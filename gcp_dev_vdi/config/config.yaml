@@ -1,0 +1,23 @@
+zone: "us-central1-a"
+
+users:
+  - username: "user1"
+    instance_name: "dev-vm-user1"
+    machine_type: "e2-medium"
+    boot_disk_size_gb: 50
+    email: "user1@example.com"
+    source_image: "projects/debian-cloud/global/images/family/debian-11"
+
+  - username: "user2"
+    instance_name: "dev-vm-user2"
+    machine_type: "e2-standard-2"
+    boot_disk_size_gb: 100
+    email: "user2@example.com"
+    source_image: "projects/ubuntu-os-cloud/global/images/family/ubuntu-2004-lts"
+
+  - username: "user3"
+    instance_name: "dev-vm-user3"
+    machine_type: "e2-medium"
+    boot_disk_size_gb: 50
+    email: "user3@example.com"
+    source_image: "projects/windows-cloud/global/images/family/windows-2019"
