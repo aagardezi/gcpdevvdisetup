@@ -72,8 +72,8 @@ def create_instance(project_id, zone, instance_name, machine_type, boot_disk_siz
                     object_name = parts[3]
                     buckets_to_objects[bucket_name].append(object_name)
 
-            # Linux needs to make script executable just in case
-            linux_downloads += f"gsutil cp {gcs_uri} {dest_path}\nchmod 755 {dest_path} || true\n"
+            # Apply standard file permissions
+            linux_downloads += f"gsutil cp {gcs_uri} {dest_path}\nchmod 644 {dest_path} || true\n"
             windows_downloads += f"& gcloud storage cp {gcs_uri} '{dest_path}'\n"
 
         linux_downloads += "# --- End Injected GCS Downloads ---\n\n"

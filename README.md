@@ -87,8 +87,8 @@ users:
     # Optional: Required if using startup_files
     service_account: "my-vdi-sa@my-gcp-project-id.iam.gserviceaccount.com"
     startup_files:
-      - source_gcs_uri: "gs://your-bucket-name/folder/custom-config.sh"
-        destination_path: "/etc/custom-config.sh"
+      - source_gcs_uri: "gs://your-bucket-name/folder/custom-config.txt"
+        destination_path: "/etc/custom-config.txt"
 
   # Linux (Ubuntu 20.04)
   - username: "user2"
@@ -97,6 +97,10 @@ users:
     boot_disk_size_gb: 100
     email: "user2@example.com"
     source_image: "projects/ubuntu-os-cloud/global/images/family/ubuntu-2004-lts"
+    service_account: "vdi-vm-sa@my-gcp-project-id.iam.gserviceaccount.com"
+    startup_files:
+      - source_gcs_uri: "gs://vdi-config-my-gcp-project-id/ubuntu-config.txt"
+        destination_path: "/etc/ubuntu-config.txt"
 
   # Windows Server 2019 - Required for Windows-specific tools
   - username: "user3"
@@ -105,6 +109,10 @@ users:
     boot_disk_size_gb: 50
     email: "user3@example.com"
     source_image: "projects/windows-cloud/global/images/family/windows-2019"
+    service_account: "vdi-vm-sa@my-gcp-project-id.iam.gserviceaccount.com"
+    startup_files:
+      - source_gcs_uri: "gs://vdi-config-my-gcp-project-id/windows-config.txt"
+        destination_path: "C:\\windows-config.txt"
 ```
 
 ### Supported OS Families
