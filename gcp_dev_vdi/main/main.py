@@ -4,7 +4,7 @@ import datetime
 from google.cloud import compute_v1
 from google.cloud import storage
 
-def apply_time_bound_iam(project_id, bucket_name, service_account, instance_name):
+def apply_time_bound_iam(project_id, bucket_name, service_account, instance_name, objects):
     storage_client = storage.Client(project=project_id)
     bucket = storage_client.bucket(bucket_name)
     policy = bucket.get_iam_policy(requested_policy_version=3)
@@ -13,6 +13,15 @@ def apply_time_bound_iam(project_id, bucket_name, service_account, instance_name
     expiration = datetime.datetime.utcnow() + datetime.timedelta(minutes=30)
     expiration_str = expiration.strftime('%Y-%m-%dT%H:%M:%SZ')
 
+    # Construct strict explicit resource.name conditions mapping explicitly to each file.
+    object_conditions = []
+    for obj_name in objects:
+        object_conditions.append(f"resource.name == 'projects/_/buckets/{bucket_name}/objects/{obj_name}'")
+    
+    # Example output: request.time < ... && (resource.name == 'projects/.../objects/a' || resource.name == 'projects/.../objects/b')
+    obj_expr = " || ".join(object_conditions)
+    full_expr = f"request.time < timestamp('{expiration_str}') && ({obj_expr})"
+
     # Add IAM condition
     policy.bindings.append(
         {
@@ -20,8 +29,8 @@ def apply_time_bound_iam(project_id, bucket_name, service_account, instance_name
             "members": {f"serviceAccount:{service_account}"},
             "condition": {
                 "title": f"TempInit",
-                "description": f"Auto-expiring access for VM initialization ({instance_name})",
-                "expression": f"request.time < timestamp('{expiration_str}')",
+                "description": f"Auto-expiring explicit access for VM initialization ({instance_name})",
+                "expression": full_expr,
             }
         }
     )
@@ -45,8 +54,10 @@ def create_instance(project_id, zone, instance_name, machine_type, boot_disk_siz
     if startup_files and not service_account:
         raise ValueError(f"service_account must be provided in config for user {instance_name} if startup_files is used.")
 
+    from collections import defaultdict
+
     if startup_files and service_account:
-        buckets_to_authorize = set()
+        buckets_to_objects = defaultdict(list)
         linux_downloads = "\n# --- Begin Injected GCS Downloads ---\n"
         windows_downloads = "\n# --- Begin Injected GCS Downloads ---\n"
 
@@ -55,8 +66,11 @@ def create_instance(project_id, zone, instance_name, machine_type, boot_disk_siz
             dest_path = file_config["destination_path"]
 
             if gcs_uri.startswith("gs://"):
-                bucket_name = gcs_uri.split("/")[2]
-                buckets_to_authorize.add(bucket_name)
+                parts = gcs_uri.split("/", 3)
+                if len(parts) >= 4:
+                    bucket_name = parts[2]
+                    object_name = parts[3]
+                    buckets_to_objects[bucket_name].append(object_name)
 
             # Linux needs to make script executable just in case
             linux_downloads += f"gsutil cp {gcs_uri} {dest_path}\nchmod 755 {dest_path} || true\n"
@@ -65,8 +79,8 @@ def create_instance(project_id, zone, instance_name, machine_type, boot_disk_siz
         linux_downloads += "# --- End Injected GCS Downloads ---\n\n"
         windows_downloads += "# --- End Injected GCS Downloads ---\n\n"
 
-        for bucket in buckets_to_authorize:
-            apply_time_bound_iam(project_id, bucket, service_account, instance_name)
+        for bucket, objects in buckets_to_objects.items():
+            apply_time_bound_iam(project_id, bucket, service_account, instance_name, objects)
 
         if "#!/bin/bash" in startup_script:
             startup_script = startup_script.replace("#!/bin/bash", "#!/bin/bash" + linux_downloads, 1)

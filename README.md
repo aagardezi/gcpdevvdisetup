@@ -21,21 +21,32 @@ This project automates the deployment and management of development VDI VMs (Lin
     export GCP_PROJECT="your-gcp-project-id"
     ```
 
-3.  **Configure the project:**
+3.  **Bootstrap the Cloud Environment:**
+    The project includes an automated script that configures your GCP environment conforming to the principle of least privilege. It ensures the configuration bucket is generated and provisions dedicated Service Accounts for the orchestration system.
 
-    *   Open `config/config.yaml` and replace the placeholder values with your GCP project ID, zone, and user information.
+    ```bash
+    chmod +x scripts/setup_gcp.sh
+    ./scripts/setup_gcp.sh
+    ```
+    **What this script does:**
+    * Prompts and establishes a secure GCS bucket using Uniform Bucket Level Access.
+    * Provisions a target **Orchestrator Service Account** (`vdi-deployer-sa`) holding the minimal rules required to orchestrate instance creation and safely isolate file transfers via programmatic IAM roles.
+    * Provisions a strictly-isolated **VM Instance Identity Account** (`vdi-vm-sa`).
 
-4.  **Set up a GCS bucket:**
+4.  **Configure the project:**
+    * Follow the format in `config/config.yaml` and replace the placeholder values with your GCP options.
+    * Ensure you place the newly created VM Identity (`vdi-vm-sa@...`) as the `service_account` option under your users if leveraging configuration file mappings.
+    * Upload your initialized `config/config.yaml` file to the GCS bucket dynamically generated.
 
-    *   Create a GCS bucket to store the `config.yaml` file.
-    *   Upload the `config/config.yaml` file to the GCS bucket.
+5.  **Deploy the Orchestrator Cloud Function:**
+    * Deploy the `main.py` utilizing your dedicated IAM profile.
 
-5.  **Deploy the Cloud Function:**
-
-    *   Deploy the `main.py` script as a Cloud Function that is triggered by changes to the `config.yaml` file in the GCS bucket.
-
-        ```
-        gcloud functions deploy gcp-dev-vdi --runtime python39 --trigger-resource your-gcs-bucket-name --trigger-event google.storage.object.finalize
+        ```bash
+        gcloud functions deploy gcp-dev-vdi \
+            --runtime python39 \
+            --service-account="vdi-deployer-sa@your-gcp-project-id.iam.gserviceaccount.com" \
+            --trigger-resource="vdi-config-your-gcp-project-id" \
+            --trigger-event google.storage.object.finalize
         ```
 
 ## Configuration & OS Selection
@@ -48,8 +59,8 @@ The project supports securely copying files directly from an internal GCS bucket
 
 **How it works:**
 1. You define files under the `startup_files` array within `config.yaml`.
-2. You **must** provide a specific `service_account` for the VM to facilitate the transfer.
-3. The deployment Cloud Function (`main.py`) temporarily grants this Service Account the `roles/storage.objectViewer` permission on the target GCS bucket using a strictly enforced **30-minute IAM Condition expiration**. 
+2. You **must** provide the generated VM Identity `vdi-vm-sa` as the specific `service_account` for the VM to facilitate the transfer.
+3. The deployment Cloud Function (`main.py`) temporarily grants this Service Account the `roles/storage.objectViewer` permission mapping strictly against **only the specific runtime files you configured**. The rest of the GCS bucket contents are entirely concealed. This temporary isolated logic relies on a **30-minute IAM Condition expiration** dynamically mapped via `resource.name`. 
 4. The script automatically injects the download commands natively into the VM's OS:
    - **Linux:** Uses `gsutil cp gs://... /path/`
    - **Windows:** Uses PowerShell `& gcloud storage cp gs://... 'C:\path'`
