@@ -4,13 +4,13 @@ import datetime
 from google.cloud import compute_v1
 from google.cloud import storage
 
-def apply_time_bound_iam(project_id, bucket_name, service_account, instance_name, objects):
+def apply_time_bound_iam(project_id, bucket_name, service_account, instance_name, objects, timeout_minutes=30):
     storage_client = storage.Client(project=project_id)
     bucket = storage_client.bucket(bucket_name)
     policy = bucket.get_iam_policy(requested_policy_version=3)
 
-    # 30 minutes from now
-    expiration = datetime.datetime.utcnow() + datetime.timedelta(minutes=30)
+    # Dynamic expiration window from config
+    expiration = datetime.datetime.utcnow() + datetime.timedelta(minutes=timeout_minutes)
     expiration_str = expiration.strftime('%Y-%m-%dT%H:%M:%SZ')
 
     # Construct strict explicit resource.name conditions mapping explicitly to each file.
@@ -38,7 +38,7 @@ def apply_time_bound_iam(project_id, bucket_name, service_account, instance_name
     policy.version = 3
     bucket.set_iam_policy(policy)
 
-def create_instance(project_id, zone, instance_name, machine_type, boot_disk_size_gb, startup_script, source_image, windows_startup_script, service_account=None, startup_files=None):
+def create_instance(project_id, zone, instance_name, machine_type, boot_disk_size_gb, startup_script, source_image, windows_startup_script, service_account=None, startup_files=None, timeout_minutes=30):
     compute_client = compute_v1.InstancesClient()
     machine_type_uri = f"zones/{zone}/machineTypes/{machine_type}"
 
@@ -80,7 +80,7 @@ def create_instance(project_id, zone, instance_name, machine_type, boot_disk_siz
         windows_downloads += "# --- End Injected GCS Downloads ---\n\n"
 
         for bucket, objects in buckets_to_objects.items():
-            apply_time_bound_iam(project_id, bucket, service_account, instance_name, objects)
+            apply_time_bound_iam(project_id, bucket, service_account, instance_name, objects, timeout_minutes)
 
         if "#!/bin/bash" in startup_script:
             startup_script = startup_script.replace("#!/bin/bash", "#!/bin/bash" + linux_downloads, 1)
@@ -142,6 +142,7 @@ def main(event, context):
         raise ValueError("GCP_PROJECT environment variable not set")
 
     zone = config["zone"]
+    timeout_minutes = config.get("startup_timeout_minutes", 30)
 
     startup_script = """
     #!/bin/bash
@@ -267,7 +268,8 @@ EOF'
             source_image=user["source_image"],
             windows_startup_script=windows_startup_script,
             service_account=user.get("service_account"),
-            startup_files=user.get("startup_files")
+            startup_files=user.get("startup_files"),
+            timeout_minutes=timeout_minutes
         )
 
 if __name__ == "__main__":

@@ -60,11 +60,11 @@ The project supports securely copying files directly from an internal GCS bucket
 **How it works:**
 1. You define files under the `startup_files` array within `config.yaml`.
 2. You **must** provide the generated VM Identity `vdi-vm-sa` as the specific `service_account` for the VM to facilitate the transfer.
-3. The deployment Cloud Function (`main.py`) temporarily grants this Service Account the `roles/storage.objectViewer` permission mapping strictly against **only the specific runtime files you configured**. The rest of the GCS bucket contents are entirely concealed. This temporary isolated logic relies on a **30-minute IAM Condition expiration** dynamically mapped via `resource.name`. 
+3. The deployment Cloud Function (`main.py`) temporarily grants this Service Account the `roles/storage.objectViewer` permission mapping strictly against **only the specific runtime files you configured**. The rest of the GCS bucket contents are entirely concealed. This temporary isolated logic relies on an IAM Condition natively restricting access to a predefined duration (defaulting to 30 minutes, configurable via `startup_timeout_minutes`).
 4. The script automatically injects the download commands natively into the VM's OS:
    - **Linux:** Uses `gsutil cp gs://... /path/`
    - **Windows:** Uses PowerShell `& gcloud storage cp gs://... 'C:\path'`
-5. Access is completely revoked natively by IAM after 30 minutes, securing the bucket even if the VM is later compromised.
+5. Access is completely revoked natively by IAM after the configured timeout elapses, securing the bucket even if the VM is later compromised.
 
 **Setup Requirement:** The Service Account that executes your continuous deployment Cloud Function must have permission to manage IAM policies on the target bucket (e.g., `roles/storage.admin` or `roles/storage.legacyBucketOwner`).
 
@@ -72,6 +72,9 @@ The project supports securely copying files directly from an internal GCS bucket
 
 ```yaml
 zone: "us-central1-a"
+
+# Optional: Number of minutes before the VM's access to startup_files expires natively in IAM. Default is 30.
+startup_timeout_minutes: 30
 
 users:
   # Linux (Debian 11) - Recommended for general dev

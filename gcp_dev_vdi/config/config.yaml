@@ -1,5 +1,7 @@
 zone: "us-central1-a"
 
+# Optional: Number of minutes before the VM's access to startup_files expires natively in IAM. Default is 30.
+startup_timeout_minutes: 30
 users:
   - username: "user1"
     instance_name: "dev-vm-user1"
