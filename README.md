@@ -43,6 +43,20 @@ This project automates the deployment and management of development VDI VMs (Lin
 To configure your VDI VMs, Edit `config/config.yaml`.
 You can select the Operating System by changing the `source_image`.
 
+### Secure Startup File Injection
+The project supports securely copying files directly from an internal GCS bucket into VM deployments at boot time without exposing the GCS bucket to the external internet or leaking long-lived IAM permissions.
+
+**How it works:**
+1. You define files under the `startup_files` array within `config.yaml`.
+2. You **must** provide a specific `service_account` for the VM to facilitate the transfer.
+3. The deployment Cloud Function (`main.py`) temporarily grants this Service Account the `roles/storage.objectViewer` permission on the target GCS bucket using a strictly enforced **30-minute IAM Condition expiration**. 
+4. The script automatically injects the download commands natively into the VM's OS:
+   - **Linux:** Uses `gsutil cp gs://... /path/`
+   - **Windows:** Uses PowerShell `& gcloud storage cp gs://... 'C:\path'`
+5. Access is completely revoked natively by IAM after 30 minutes, securing the bucket even if the VM is later compromised.
+
+**Setup Requirement:** The Service Account that executes your continuous deployment Cloud Function must have permission to manage IAM policies on the target bucket (e.g., `roles/storage.admin` or `roles/storage.legacyBucketOwner`).
+
 ### Sample `config.yaml`
 
 ```yaml
@@ -56,6 +70,11 @@ users:
     boot_disk_size_gb: 50
     email: "user1@example.com"
     source_image: "projects/debian-cloud/global/images/family/debian-11"
+    # Optional: Required if using startup_files
+    service_account: "my-vdi-sa@my-gcp-project-id.iam.gserviceaccount.com"
+    startup_files:
+      - source_gcs_uri: "gs://your-bucket-name/folder/custom-config.sh"
+        destination_path: "/etc/custom-config.sh"
 
   # Linux (Ubuntu 20.04)
   - username: "user2"

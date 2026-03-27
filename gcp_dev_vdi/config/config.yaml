@@ -7,6 +7,11 @@ users:
     boot_disk_size_gb: 50
     email: "user1@example.com"
     source_image: "projects/debian-cloud/global/images/family/debian-11"
+    # Provide the service account for the VM if copying startup_files
+    service_account: "my-vdi-sa@my-gcp-project-id.iam.gserviceaccount.com"
+    startup_files:
+      - source_gcs_uri: "gs://your-bucket-name/folder/custom-config.sh"
+        destination_path: "/etc/custom-config.sh"
 
   - username: "user2"
     instance_name: "dev-vm-user2"

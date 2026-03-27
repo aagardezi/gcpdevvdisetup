@@ -1,10 +1,38 @@
 import yaml
 import os
+import datetime
 from google.cloud import compute_v1
+from google.cloud import storage
 
-def create_instance(project_id, zone, instance_name, machine_type, boot_disk_size_gb, startup_script, source_image, windows_startup_script):
+def apply_time_bound_iam(project_id, bucket_name, service_account, instance_name):
+    storage_client = storage.Client(project=project_id)
+    bucket = storage_client.bucket(bucket_name)
+    policy = bucket.get_iam_policy(requested_policy_version=3)
+
+    # 30 minutes from now
+    expiration = datetime.datetime.utcnow() + datetime.timedelta(minutes=30)
+    expiration_str = expiration.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    # Add IAM condition
+    policy.bindings.append(
+        {
+            "role": "roles/storage.objectViewer",
+            "members": {f"serviceAccount:{service_account}"},
+            "condition": {
+                "title": f"TempInit",
+                "description": f"Auto-expiring access for VM initialization ({instance_name})",
+                "expression": f"request.time < timestamp('{expiration_str}')",
+            }
+        }
+    )
+    # Ensure version is 3 to enable conditions
+    policy.version = 3
+    bucket.set_iam_policy(policy)
+
+def create_instance(project_id, zone, instance_name, machine_type, boot_disk_size_gb, startup_script, source_image, windows_startup_script, service_account=None, startup_files=None):
     compute_client = compute_v1.InstancesClient()
     machine_type_uri = f"zones/{zone}/machineTypes/{machine_type}"
+
     boot_disk = {
         "initialize_params": {
             "source_image": source_image,
@@ -13,6 +41,42 @@ def create_instance(project_id, zone, instance_name, machine_type, boot_disk_siz
         "auto_delete": True,
         "boot": True,
     }
+
+    if startup_files and not service_account:
+        raise ValueError(f"service_account must be provided in config for user {instance_name} if startup_files is used.")
+
+    if startup_files and service_account:
+        buckets_to_authorize = set()
+        linux_downloads = "\n# --- Begin Injected GCS Downloads ---\n"
+        windows_downloads = "\n# --- Begin Injected GCS Downloads ---\n"
+
+        for file_config in startup_files:
+            gcs_uri = file_config["source_gcs_uri"]
+            dest_path = file_config["destination_path"]
+
+            if gcs_uri.startswith("gs://"):
+                bucket_name = gcs_uri.split("/")[2]
+                buckets_to_authorize.add(bucket_name)
+
+            # Linux needs to make script executable just in case
+            linux_downloads += f"gsutil cp {gcs_uri} {dest_path}\nchmod 755 {dest_path} || true\n"
+            windows_downloads += f"& gcloud storage cp {gcs_uri} '{dest_path}'\n"
+
+        linux_downloads += "# --- End Injected GCS Downloads ---\n\n"
+        windows_downloads += "# --- End Injected GCS Downloads ---\n\n"
+
+        for bucket in buckets_to_authorize:
+            apply_time_bound_iam(project_id, bucket, service_account, instance_name)
+
+        if "#!/bin/bash" in startup_script:
+            startup_script = startup_script.replace("#!/bin/bash", "#!/bin/bash" + linux_downloads, 1)
+        else:
+            startup_script = linux_downloads + startup_script
+
+        if "#Requires -RunAsAdministrator" in windows_startup_script:
+            windows_startup_script = windows_startup_script.replace("#Requires -RunAsAdministrator", "#Requires -RunAsAdministrator" + windows_downloads, 1)
+        else:
+            windows_startup_script = windows_downloads + windows_startup_script
 
     # Select the startup script based on the OS
     if 'windows' in source_image.lower():
@@ -43,6 +107,14 @@ def create_instance(project_id, zone, instance_name, machine_type, boot_disk_siz
             ]
         }
     }
+
+    if service_account:
+        instance["service_accounts"] = [
+            {
+                "email": service_account,
+                "scopes": ["https://www.googleapis.com/auth/cloud-platform"],
+            }
+        ]
 
     operation = compute_client.insert(project=project_id, zone=zone, instance_resource=instance)
     return operation.result()
@@ -172,14 +244,16 @@ EOF'
 
     for user in config["users"]:
         create_instance(
-            project_id,
-            zone,
-            user["instance_name"],
-            user["machine_type"],
-            user["boot_disk_size_gb"],
-            startup_script,
-            user["source_image"],
-            windows_startup_script
+            project_id=project_id,
+            zone=zone,
+            instance_name=user["instance_name"],
+            machine_type=user["machine_type"],
+            boot_disk_size_gb=user["boot_disk_size_gb"],
+            startup_script=startup_script,
+            source_image=user["source_image"],
+            windows_startup_script=windows_startup_script,
+            service_account=user.get("service_account"),
+            startup_files=user.get("startup_files")
         )
 
 if __name__ == "__main__":
